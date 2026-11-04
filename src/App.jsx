@@ -106,6 +106,48 @@ const solveMaxPrincipalFromMonthlyPayment = ({
   }
 };
 
+// 逆推利率之年利率上限 (%)
+const MAX_REVERSE_ANNUAL_RATE = 30;
+
+// 由貸款總額 + 預期每月還款金額逆推名目年利率 (%) (支援本息均攤/本金均攤、寬限期)
+// 回傳 { rate, error }；error: 'insufficient' (月付不足以在期限內還清本金) | 'too-high' (超過上限) | null
+const solveAnnualRateFromPayment = ({
+  loanAmount,
+  targetMonthlyPayment,
+  totalMonths,
+  repaymentMethod,
+  graceMonths
+}) => {
+  const P = Math.max(0, Number(loanAmount) || 0);
+  const pmt = Math.max(0, Number(targetMonthlyPayment) || 0);
+  const N = Math.max(1, Math.min(360, Math.round(Number(totalMonths) || 84)));
+  const G = Math.max(0, Math.min(N - 1, Math.round(Number(graceMonths) || 0)));
+  const n = Math.max(1, N - G); // 寬限期後實際攤還期數
+  if (P <= 0 || pmt <= 0) return { rate: 0, error: null };
+
+  if (repaymentMethod === 'equal-principal') {
+    // 本金平均攤還：首期攤還月付 = P / n + P * r  →  r = (PMT - P / n) / P (封閉解)
+    const r = (pmt - P / n) / P;
+    if (r < -1e-12) return { rate: 0, error: 'insufficient' };
+    const annual = Math.max(0, r) * 12 * 100;
+    return annual > MAX_REVERSE_ANNUAL_RATE
+      ? { rate: MAX_REVERSE_ANNUAL_RATE, error: 'too-high' }
+      : { rate: annual, error: null };
+  }
+
+  // 本息平均攤還：PMT 隨月利率單調遞增，以二分法求解 (穩定不發散)
+  if (pmt * n < P - 0.5) return { rate: 0, error: 'insufficient' };
+  let lo = 0;
+  let hi = MAX_REVERSE_ANNUAL_RATE / 100 / 12;
+  if (calcPMT(P, hi, n) < pmt) return { rate: MAX_REVERSE_ANNUAL_RATE, error: 'too-high' };
+  for (let i = 0; i < 100; i++) {
+    const mid = (lo + hi) / 2;
+    if (calcPMT(P, mid, n) > pmt) hi = mid;
+    else lo = mid;
+  }
+  return { rate: ((lo + hi) / 2) * 12 * 100, error: null };
+};
+
 // 使用牛頓法求解總費用年百分率 (APR / IRR)
 const calculateAPR = (loanAmount, fee, monthlyPayments) => {
   const netProceeds = loanAmount - fee;
@@ -762,6 +804,7 @@ export default function App() {
   // 1. 信貸試算狀態 (與第3頁共用核心參數或可一鍵同步)
   // ------------------------------------------
   // 試算模式：'by-amount' (輸入貸款總額算月付金) | 'by-payment' (輸入預期月付金額逆推可貸總額)
+  //          | 'by-rate' (輸入貸款總額 + 月付金 + 開辦費逆推利率)
   const [loanCalcMode, setLoanCalcMode] = useState('by-amount');
   const [targetMonthlyPayment, setTargetMonthlyPayment] = useState(20000); // 預期每月還款金額
   const [loanAmount, setLoanAmount] = useState(1500000); // 150 萬
@@ -834,14 +877,34 @@ export default function App() {
   const effectiveLoanAmount =
     loanCalcMode === 'by-payment' ? reverseCalculatedLoanAmount : loanAmount;
 
+  // 當選擇「由貸款總額 + 月付金逆推利率」時，即時動態計算名目年利率
+  const reverseRateResult = useMemo(
+    () =>
+      solveAnnualRateFromPayment({
+        loanAmount,
+        targetMonthlyPayment,
+        totalMonths: loanMonths,
+        repaymentMethod,
+        graceMonths
+      }),
+    [loanAmount, targetMonthlyPayment, loanMonths, repaymentMethod, graceMonths]
+  );
+
+  // 逆推利率模式下強制使用一段式利率，並以逆推結果作為實際計息利率 (即時同步第 3 頁)
+  const isRateMode = loanCalcMode === 'by-rate';
+  const effectiveRateMode = isRateMode ? 'single' : rateMode;
+  const effectiveSingleRate = isRateMode
+    ? Number(reverseRateResult.rate.toFixed(4))
+    : singleRate;
+
   const loanConfig = useMemo(
     () => ({
       loanAmount: effectiveLoanAmount,
       totalMonths: loanMonths,
       repaymentMethod,
       graceMonths,
-      rateMode,
-      singleRate,
+      rateMode: effectiveRateMode,
+      singleRate: effectiveSingleRate,
       stage1Months,
       stage1Rate,
       stage2Rate,
@@ -852,8 +915,8 @@ export default function App() {
       loanMonths,
       repaymentMethod,
       graceMonths,
-      rateMode,
-      singleRate,
+      effectiveRateMode,
+      effectiveSingleRate,
       stage1Months,
       stage1Rate,
       stage2Rate,
@@ -1157,6 +1220,8 @@ export default function App() {
                   <span className="text-[11px] sm:text-xs font-semibold tracking-wide bg-white/20 backdrop-blur-xs px-3 py-1 rounded-full whitespace-nowrap">
                     {loanCalcMode === 'by-payment'
                       ? '由預期月付金逆推可貸總額模式'
+                      : loanCalcMode === 'by-rate'
+                      ? '由月付金與貸款總額逆推利率模式'
                       : '由貸款總額試算月付金模式'}
                   </span>
                 </div>
@@ -1185,7 +1250,21 @@ export default function App() {
               </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
-                {loanCalcMode === 'by-payment' ? (
+                {loanCalcMode === 'by-rate' ? (
+                  <div className="bg-[#382218]/40 border border-white/30 backdrop-blur-xs rounded-2xl p-3 sm:p-3.5 min-w-0">
+                    <p className="text-[11px] sm:text-xs text-[#FFE5DC] font-semibold mb-1 truncate">
+                      逆推名目年利率
+                    </p>
+                    <p className="text-base sm:text-xl md:text-2xl font-extrabold text-[#FFF9F6] whitespace-nowrap tracking-tight tabular-nums">
+                      {reverseRateResult.error === 'insufficient'
+                        ? '無解'
+                        : `${reverseRateResult.error === 'too-high' ? '>' : ''}${reverseRateResult.rate.toFixed(2)}%`}
+                    </p>
+                    <p className="text-[11px] text-white/85 mt-1 truncate">
+                      月付 {formatCurrency(targetMonthlyPayment)} / {formatShortCurrency(loanAmount)}
+                    </p>
+                  </div>
+                ) : loanCalcMode === 'by-payment' ? (
                   <div className="bg-[#382218]/40 border border-white/30 backdrop-blur-xs rounded-2xl p-3 sm:p-3.5 min-w-0">
                     <p className="text-[11px] sm:text-xs text-[#FFE5DC] font-semibold mb-1 truncate">
                       逆推可貸最高總額
@@ -1277,7 +1356,7 @@ export default function App() {
                     <ArrowRightLeft className="w-3.5 h-3.5 text-[#E06D53]" />
                     選擇試算方式
                   </label>
-                  <div className="grid grid-cols-2 gap-1.5 bg-[#F4DDD3] p-1 rounded-xl">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 bg-[#F4DDD3] p-1 rounded-xl">
                     <button
                       type="button"
                       onClick={() => setLoanCalcMode('by-amount')}
@@ -1292,9 +1371,11 @@ export default function App() {
                     <button
                       type="button"
                       onClick={() => {
-                        setTargetMonthlyPayment(
-                          Math.max(1000, Math.round(loanCalc.postGracePayment || 20000))
-                        );
+                        if (loanCalcMode === 'by-amount') {
+                          setTargetMonthlyPayment(
+                            Math.max(1000, Math.round(loanCalc.postGracePayment || 20000))
+                          );
+                        }
                         setLoanCalcMode('by-payment');
                       }}
                       className={`py-2 px-1.5 rounded-lg text-[11px] sm:text-xs font-extrabold whitespace-nowrap transition-all ${
@@ -1304,6 +1385,27 @@ export default function App() {
                       }`}
                     >
                       輸入「預期月付」逆推總額
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (loanCalcMode === 'by-payment') {
+                          // 由逆推總額模式切換時，沿用逆推出的貸款總額，避免總額跳動
+                          setLoanAmount(effectiveLoanAmount);
+                        } else if (loanCalcMode === 'by-amount') {
+                          setTargetMonthlyPayment(
+                            Math.max(1000, Math.round(loanCalc.postGracePayment || 20000))
+                          );
+                        }
+                        setLoanCalcMode('by-rate');
+                      }}
+                      className={`py-2 px-1.5 rounded-lg text-[11px] sm:text-xs font-extrabold whitespace-nowrap transition-all ${
+                        loanCalcMode === 'by-rate'
+                          ? 'bg-[#E06D53] text-white shadow-xs'
+                          : 'text-[#6E4B3E] hover:text-[#382218]'
+                      }`}
+                    >
+                      輸入「月付＋總額」逆推利率
                     </button>
                   </div>
                 </div>
@@ -1339,7 +1441,106 @@ export default function App() {
                   </div>
                 </div>
 
-                {loanCalcMode === 'by-amount' ? (
+                {loanCalcMode === 'by-rate' ? (
+                  <div className="space-y-3">
+                    <NumberSliderInput
+                      label="貸款總金額"
+                      value={loanAmount}
+                      onChange={setLoanAmount}
+                      min={100000}
+                      max={8000000}
+                      step={50000}
+                      prefix="NT$"
+                      quickPresets={[
+                        { label: '80萬', value: 800000 },
+                        { label: '150萬', value: 1500000 },
+                        { label: '250萬', value: 2500000 },
+                        { label: '350萬', value: 3500000 },
+                        { label: '500萬', value: 5000000 }
+                      ]}
+                    />
+                    <NumberSliderInput
+                      label={
+                        repaymentMethod === 'equal-pi'
+                          ? graceMonths > 0
+                            ? '每月還款金額 (寬限期後本息均攤月付)'
+                            : '每月還款金額 (本息均攤月付)'
+                          : '最高每月還款金額 (首期攤還月付)'
+                      }
+                      value={targetMonthlyPayment}
+                      onChange={setTargetMonthlyPayment}
+                      min={3000}
+                      max={150000}
+                      step={100}
+                      prefix="NT$"
+                      helperText={
+                        reverseRateResult.error === 'insufficient'
+                          ? '月付不足'
+                          : `年利率約 ${reverseRateResult.rate.toFixed(2)}%`
+                      }
+                    />
+
+                    {/* 逆推利率結果醒目提示卡 */}
+                    <div className="bg-gradient-to-r from-[#FFF3EE] to-[#FDE6DF] border-2 border-[#E06D53] rounded-2xl p-3.5 space-y-2">
+                      {reverseRateResult.error === 'insufficient' ? (
+                        <div className="flex items-start gap-2 text-[#B85741]">
+                          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                          <p className="text-xs font-bold">
+                            月付金不足以在 {Math.max(1, loanMonths - graceMonths)} 期攤還期內還清本金{' '}
+                            {formatCurrency(loanAmount)}，請提高月付金、延長期數或降低貸款總額。
+                          </p>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="grid grid-cols-2 gap-3 flex-1 min-w-0">
+                              <div className="min-w-0">
+                                <p className="text-[11px] font-bold text-[#B85741] truncate">
+                                  名目年利率 (不含費用)
+                                </p>
+                                <p className="text-lg font-extrabold text-[#382218] tabular-nums">
+                                  {reverseRateResult.error === 'too-high' ? '>' : ''}
+                                  {reverseRateResult.rate.toFixed(2)}%
+                                </p>
+                              </div>
+                              <div className="min-w-0">
+                                <p className="text-[11px] font-bold text-[#B85741] truncate">
+                                  總費用年百分率 APR
+                                </p>
+                                <p className="text-lg font-extrabold text-[#382218] tabular-nums">
+                                  {loanCalc.apr.toFixed(2)}%
+                                </p>
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              disabled={!!reverseRateResult.error}
+                              onClick={() => {
+                                setSingleRate(Number(reverseRateResult.rate.toFixed(2)));
+                                setRateMode('single');
+                                setLoanCalcMode('by-amount');
+                              }}
+                              className="text-xs font-bold bg-[#382218] text-[#FFF9F6] px-3 py-2 rounded-xl hover:bg-[#523428] transition-all shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                              鎖定此利率
+                            </button>
+                          </div>
+                          <p className="text-[11px] text-[#6E4B3E]">
+                            APR 含開辦費 {formatCurrency(loanFee)}，實拿{' '}
+                            {formatCurrency(Math.max(0, loanAmount - loanFee))}
+                            {graceMonths > 0 ? `；前 ${graceMonths} 個月寬限期只繳息` : ''}
+                          </p>
+                          {reverseRateResult.error === 'too-high' && (
+                            <p className="text-[11px] font-bold text-[#B85741] flex items-center gap-1">
+                              <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                              逆推利率超過 {MAX_REVERSE_ANNUAL_RATE}%，請確認輸入是否正確
+                            </p>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                ) : loanCalcMode === 'by-amount' ? (
                   <NumberSliderInput
                     label="貸款總金額"
                     value={loanAmount}
@@ -1446,7 +1647,15 @@ export default function App() {
                   ]}
                 />
 
-                {/* 利率結構：一段式 vs 兩段式階梯利率 */}
+                {/* 利率結構：一段式 vs 兩段式階梯利率 (逆推利率模式下由月付金逆推，隱藏手動設定) */}
+                {isRateMode ? (
+                  <div className="p-3 rounded-2xl bg-[#FDF2EC] border border-[#F0D9CE] flex items-center gap-2 text-xs">
+                    <Percent className="w-3.5 h-3.5 text-[#E06D53] shrink-0" />
+                    <span className="font-bold text-[#5C3D31]">
+                      計息結構：一段式固定利率 {effectiveSingleRate.toFixed(2)}% (由月付逆推中)
+                    </span>
+                  </div>
+                ) : (
                 <div className="pt-1">
                   <label className="block text-xs font-bold text-[#5C3D31] mb-1.5">
                     計息結構
@@ -1539,6 +1748,7 @@ export default function App() {
                     </div>
                   )}
                 </div>
+                )}
 
                 <NumberSliderInput
                   label="銀行開辦費 / 手續費"
@@ -2625,11 +2835,18 @@ export default function App() {
                   />
                 </div>
 
-                {rateMode === 'single' ? (
+                {effectiveRateMode === 'single' ? (
                   <NumberSliderInput
-                    label="信貸年利率 (一段式)"
-                    value={singleRate}
-                    onChange={setSingleRate}
+                    label={isRateMode ? '信貸年利率 (由第 1 頁月付逆推)' : '信貸年利率 (一段式)'}
+                    value={Number(effectiveSingleRate.toFixed(2))}
+                    onChange={(val) => {
+                      // 若於第 3 頁手動調整利率，則退出逆推利率模式並改以手動利率計息
+                      if (isRateMode) {
+                        setRateMode('single');
+                        setLoanCalcMode('by-amount');
+                      }
+                      setSingleRate(val);
+                    }}
                     min={1.5}
                     max={10.0}
                     step={0.01}
