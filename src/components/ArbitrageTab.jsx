@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   Wallet,
   Sparkles,
@@ -27,7 +27,15 @@ import {
   Line
 } from 'recharts';
 import NumberSliderInput from './NumberSliderInput';
+import MobileStickySummary from './MobileStickySummary';
 import { formatCurrency, formatShortCurrency } from '../utils/finance';
+
+const RETURN_SCENARIOS = [
+  { label: '市值成長 7+1.5%', growth: 7.0, div: 1.5 },
+  { label: '高股息 2+6%', growth: 2.0, div: 6.0 },
+  { label: '平衡配置 4.5+4%', growth: 4.5, div: 4.0 },
+  { label: '壓力測試 2+2%', growth: 2.0, div: 2.0 }
+];
 
 export default function ArbitrageTab({
   loanAmount,
@@ -74,6 +82,7 @@ export default function ArbitrageTab({
   onOpenGuide
 }) {
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const heroRef = useRef(null);
 
   const filteredDetails = arbCalc.monthlyDetails.filter(
     (r) => arbTableFilterYear === 'all' || String(r.year) === arbTableFilterYear
@@ -93,6 +102,25 @@ export default function ArbitrageTab({
 
   return (
     <div className="space-y-5">
+      <MobileStickySummary
+        targetRef={heroRef}
+        items={[
+          {
+            label: `期滿淨賺(${loanMonths}期)`,
+            value: `${arbCalc.activeNetProfit >= 0 ? '+' : ''}${formatCurrency(arbCalc.activeNetProfit)}`,
+            tone: arbCalc.activeNetProfit >= 0 ? 'positive' : 'negative'
+          },
+          {
+            label: '期末資產',
+            value: formatShortCurrency(arbCalc.activeFinalAsset),
+            tone: 'accent'
+          },
+          {
+            label: '年化利差',
+            value: `${arbCalc.spreadRate >= 0 ? '+' : ''}${arbCalc.spreadRate.toFixed(2)}%`
+          }
+        ]}
+      />
       {/* Compact Top Mode Switcher Strip */}
       <div className="bg-[#FFFDFB] border border-[#EADCD3] rounded-2xl p-2 sm:p-2.5 shadow-card flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 flex-1">
@@ -225,6 +253,7 @@ export default function ArbitrageTab({
                 max={Math.min(36, Math.max(0, loanMonths - 1))}
                 step={3}
                 unit="個月"
+                strictMax
                 quickPresets={[
                   { label: '無寬限', value: 0 },
                   { label: '12個月', value: 12 },
@@ -279,6 +308,31 @@ export default function ArbitrageTab({
               <span className="text-xs font-extrabold px-2.5 py-0.5 rounded-full bg-[#EAF6F1] text-[#1F7A5C] tabular-nums">
                 合計年化 {arbCalc.totalExpectedAnnualReturn.toFixed(2)}%
               </span>
+            </div>
+
+            <div className="flex flex-wrap gap-1.5 mb-3">
+              {RETURN_SCENARIOS.map((sc) => {
+                const active =
+                  Math.abs(arbGrowthRate - sc.growth) < 0.05 &&
+                  Math.abs(arbDividendRate - sc.div) < 0.05;
+                return (
+                  <button
+                    key={sc.label}
+                    type="button"
+                    onClick={() => {
+                      setArbGrowthRate(sc.growth);
+                      setArbDividendRate(sc.div);
+                    }}
+                    className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border transition-all active:scale-95 ${
+                      active
+                        ? 'bg-[#2C1A12] text-white border-[#2C1A12]'
+                        : 'bg-[#FAF5F0] text-[#6D4E40] border-[#EADCD3] hover:bg-[#F4EAE3] hover:text-[#2C1A12]'
+                    }`}
+                  >
+                    {sc.label}
+                  </button>
+                );
+              })}
             </div>
 
             <div>
@@ -516,7 +570,10 @@ export default function ArbitrageTab({
         {/* Right Canvas: Decision KPIs + Charts + Mode Comparison */}
         <div className="lg:col-span-7 order-1 lg:order-2 space-y-5 min-w-0">
           {/* Executive Hero Summary */}
-          <div className="bg-gradient-to-br from-[#2C1A12] via-[#3A2319] to-[#4F3124] rounded-2xl p-5 sm:p-6 text-[#FFFDFB] shadow-elevated">
+          <div
+            ref={heroRef}
+            className="bg-gradient-to-br from-[#2C1A12] via-[#3A2319] to-[#4F3124] rounded-2xl p-5 sm:p-6 text-[#FFFDFB] shadow-elevated"
+          >
             <div className="flex flex-wrap items-center justify-between gap-2 mb-5">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs font-bold px-3 py-1 rounded-full bg-[#D95D39] text-white">
@@ -948,9 +1005,19 @@ export default function ArbitrageTab({
             </span>
           </div>
           <div>
-            <span className="text-[11px] text-[#8B6B5C] block">期間自掏薪水合計</span>
-            <span className="text-xs sm:text-sm font-extrabold text-[#2C1A12] tabular-nums">
-              {formatCurrency(periodOutOfPocket)}
+            <span className="text-[11px] text-[#8B6B5C] block">
+              {periodOutOfPocket < -0.5 ? '期間配息抵月付淨結餘' : '期間自掏薪水合計'}
+            </span>
+            <span
+              className={`text-xs sm:text-sm font-extrabold tabular-nums ${
+                periodOutOfPocket < -0.5 ? 'text-[#1F7A5C]' : 'text-[#2C1A12]'
+              }`}
+            >
+              {Math.abs(periodOutOfPocket) < 0.5
+                ? 'NT$ 0'
+                : periodOutOfPocket < 0
+                ? `+${formatCurrency(Math.abs(periodOutOfPocket))}`
+                : formatCurrency(periodOutOfPocket)}
             </span>
           </div>
           <div>
@@ -979,85 +1046,91 @@ export default function ArbitrageTab({
                 {repaymentSource === 'portfolio' && (
                   <th className="py-2.5 px-3 font-bold text-right">準備金補水動作</th>
                 )}
-                <th className="py-2.5 px-3 font-bold text-right">自掏薪水</th>
+                <th className="py-2.5 px-3 font-bold text-right">自掏薪水 / 淨結餘</th>
                 <th className="py-2.5 px-3 font-bold text-right">期末總資產</th>
                 <th className="py-2.5 px-3 font-bold text-right">期末剩餘貸款</th>
                 <th className="py-2.5 px-3 font-bold text-right">期末帳面淨值</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#F4EAE3] tabular-nums">
-              {filteredDetails.map((row) => (
-                <tr key={row.month} className="hover:bg-[#FAF5F0] transition-colors">
-                  <td className="py-2.5 px-3 font-bold text-[#2C1A12]">
-                    M{row.month}
-                    <span className="ml-1 text-[10px] font-normal text-[#8B6B5C]">
-                      Y{row.year}
-                    </span>
-                  </td>
-                  {repaymentSource === 'portfolio' ? (
-                    <>
-                      <td className="py-2.5 px-3 text-right font-semibold text-[#2C1A12]">
-                        {formatCurrency(row.endStockA)}
-                      </td>
-                      <td className="py-2.5 px-3 text-right font-semibold text-[#B54B2E]">
-                        {formatCurrency(row.endCashA)}
-                      </td>
-                    </>
-                  ) : (
-                    <td className="py-2.5 px-3 text-right text-[#6D4E40]">
-                      {formatCurrency(row.startAsset)}
+              {filteredDetails.map((row) => {
+                const isZeroPocket = Math.abs(row.outOfPocketThisMonth) < 0.5;
+                const isSurplus = row.outOfPocketThisMonth <= -0.5;
+                return (
+                  <tr key={row.month} className="hover:bg-[#FAF5F0] transition-colors">
+                    <td className="py-2.5 px-3 font-bold text-[#2C1A12]">
+                      M{row.month}
+                      <span className="ml-1 text-[10px] font-normal text-[#8B6B5C]">
+                        Y{row.year}
+                      </span>
                     </td>
-                  )}
-                  <td className="py-2.5 px-3 text-right text-[#1F7A5C] font-semibold">
-                    +{formatCurrency(row.monthTotalReturn)}
-                    <span className="ml-1 text-[10px] font-normal text-[#8B6B5C]">
-                      (息 {formatShortCurrency(row.monthDividend)})
-                    </span>
-                  </td>
-                  <td className="py-2.5 px-3 text-right">
-                    <span className="font-bold text-[#C04832]">
-                      -{formatCurrency(row.loanPayment)}
-                    </span>
-                    <span className="block text-[10px] text-[#8B6B5C]">
-                      本 {formatShortCurrency(row.loanPrincipal)} / 息{' '}
-                      {formatShortCurrency(row.loanInterest)}
-                    </span>
-                  </td>
-                  {repaymentSource === 'portfolio' && (
+                    {repaymentSource === 'portfolio' ? (
+                      <>
+                        <td className="py-2.5 px-3 text-right font-semibold text-[#2C1A12]">
+                          {formatCurrency(row.endStockA)}
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-semibold text-[#B54B2E]">
+                          {formatCurrency(row.endCashA)}
+                        </td>
+                      </>
+                    ) : (
+                      <td className="py-2.5 px-3 text-right text-[#6D4E40]">
+                        {formatCurrency(row.startAsset)}
+                      </td>
+                    )}
+                    <td className="py-2.5 px-3 text-right text-[#1F7A5C] font-semibold">
+                      +{formatCurrency(row.monthTotalReturn)}
+                      <span className="ml-1 text-[10px] font-normal text-[#8B6B5C]">
+                        (息 {formatShortCurrency(row.monthDividend)})
+                      </span>
+                    </td>
                     <td className="py-2.5 px-3 text-right">
-                      {row.principalSoldFromPortfolioA > 0 ? (
-                        <span className="inline-block px-2 py-0.5 rounded-md bg-[#FDF0ED] text-[#C04832] font-bold">
-                          賣股補水 {formatCurrency(row.principalSoldFromPortfolioA)}
-                        </span>
-                      ) : (
-                        <span className="text-[#8B6B5C]">水庫扣款</span>
-                      )}
+                      <span className="font-bold text-[#C04832]">
+                        -{formatCurrency(row.loanPayment)}
+                      </span>
+                      <span className="block text-[10px] text-[#8B6B5C]">
+                        本 {formatShortCurrency(row.loanPrincipal)} / 息{' '}
+                        {formatShortCurrency(row.loanInterest)}
+                      </span>
                     </td>
-                  )}
-                  <td
-                    className={`py-2.5 px-3 text-right font-bold ${
-                      row.outOfPocketThisMonth === 0 ? 'text-[#1F7A5C]' : 'text-[#C04832]'
-                    }`}
-                  >
-                    {row.outOfPocketThisMonth === 0
-                      ? 'NT$ 0'
-                      : `-${formatCurrency(row.outOfPocketThisMonth)}`}
-                  </td>
-                  <td className="py-2.5 px-3 text-right font-bold text-[#D95D39]">
-                    {formatCurrency(row.endAsset)}
-                  </td>
-                  <td className="py-2.5 px-3 text-right font-semibold text-[#2C1A12]">
-                    {formatCurrency(row.remainingDebt)}
-                  </td>
-                  <td
-                    className={`py-2.5 px-3 text-right font-extrabold ${
-                      row.currentNetWorth >= 0 ? 'text-[#1F7A5C]' : 'text-[#C04832]'
-                    }`}
-                  >
-                    {formatCurrency(row.currentNetWorth)}
-                  </td>
-                </tr>
-              ))}
+                    {repaymentSource === 'portfolio' && (
+                      <td className="py-2.5 px-3 text-right">
+                        {row.principalSoldFromPortfolioA > 0 ? (
+                          <span className="inline-block px-2 py-0.5 rounded-md bg-[#FDF0ED] text-[#C04832] font-bold">
+                            賣股補水 {formatCurrency(row.principalSoldFromPortfolioA)}
+                          </span>
+                        ) : (
+                          <span className="text-[#8B6B5C]">水庫扣款</span>
+                        )}
+                      </td>
+                    )}
+                    <td
+                      className={`py-2.5 px-3 text-right font-bold ${
+                        isZeroPocket || isSurplus ? 'text-[#1F7A5C]' : 'text-[#C04832]'
+                      }`}
+                    >
+                      {isZeroPocket
+                        ? 'NT$ 0'
+                        : isSurplus
+                        ? `+${formatCurrency(Math.abs(row.outOfPocketThisMonth))}`
+                        : `-${formatCurrency(row.outOfPocketThisMonth)}`}
+                    </td>
+                    <td className="py-2.5 px-3 text-right font-bold text-[#D95D39]">
+                      {formatCurrency(row.endAsset)}
+                    </td>
+                    <td className="py-2.5 px-3 text-right font-semibold text-[#2C1A12]">
+                      {formatCurrency(row.remainingDebt)}
+                    </td>
+                    <td
+                      className={`py-2.5 px-3 text-right font-extrabold ${
+                        row.currentNetWorth >= 0 ? 'text-[#1F7A5C]' : 'text-[#C04832]'
+                      }`}
+                    >
+                      {formatCurrency(row.currentNetWorth)}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

@@ -39,7 +39,9 @@ export const solveMaxPrincipalFromMonthlyPayment = ({
   graceMonths,
   rateMode,
   singleRate,
-  stage1Rate
+  stage1Months = 6,
+  stage1Rate,
+  stage2Rate
 }) => {
   const pmt = Math.max(0, Number(targetMonthlyPayment) || 0);
   if (pmt <= 0) return 0;
@@ -47,22 +49,35 @@ export const solveMaxPrincipalFromMonthlyPayment = ({
   const G = Math.max(0, Math.min(N - 1, Math.round(Number(graceMonths) || 0)));
   const amortizingMonths = Math.max(1, N - G);
 
-  // 以開始攤還本金時（第 G+1 期）適用的年利率作為逆推基準
-  const annualRate =
-    rateMode === 'single'
-      ? Number(singleRate) || 0
-      : Number(stage1Rate) || 0;
-  const r = annualRate / 100 / 12;
-
-  if (repaymentMethod === 'equal-pi') {
-    if (r <= 0) return Math.round(pmt * amortizingMonths);
-    const factor = Math.pow(1 + r, amortizingMonths);
-    return Math.round((pmt * (factor - 1)) / (r * factor));
-  } else {
-    // 本金平均攤還：以最高月付金（第 G+1 期：P / amortizingMonths + P * r）逆推本金
+  if (rateMode === 'single') {
+    const r = (Number(singleRate) || 0) / 100 / 12;
+    if (repaymentMethod === 'equal-pi') {
+      if (r <= 0) return Math.round(pmt * amortizingMonths);
+      const factor = Math.pow(1 + r, amortizingMonths);
+      return Math.round((pmt * (factor - 1)) / (r * factor));
+    }
     const denom = 1 / amortizingMonths + r;
     return denom > 0 ? Math.round(pmt / denom) : 0;
   }
+
+  // 兩段式利率：各期月付金與本金嚴格呈線性正比，以單位本金試算之最高月付金反推，確保全期月付皆不超過預期預算
+  const unitSchedule = generateLoanSchedule({
+    loanAmount: 1000000,
+    totalMonths: N,
+    repaymentMethod,
+    graceMonths: G,
+    rateMode: 'staged',
+    singleRate,
+    stage1Months,
+    stage1Rate,
+    stage2Rate,
+    fee: 0
+  });
+  const peakUnitPayment = unitSchedule.schedule.reduce(
+    (maxP, row) => Math.max(maxP, row.payment),
+    0
+  );
+  return peakUnitPayment > 0 ? Math.round(1000000 * (pmt / peakUnitPayment)) : 0;
 };
 
 // 逆推利率之年利率上限 (%)
@@ -436,10 +451,12 @@ export const generateArbitrageSimulation = ({
         Math.min(startStockA + totalReturnA, loanPayment - totalReturnA)
       );
       if (principalSoldFromPortfolioA > 0) sellStockCountA += 1;
-      if (endStockA < 0) {
+      if (endStockA < -0.5) {
         if (depletedMonthA === null) depletedMonthA = m;
         pocketSupplementA += Math.abs(endStockA);
         endStockA = 0;
+      } else {
+        endStockA = Math.max(0, endStockA);
       }
     } else {
       // 實務預留準備金模式（例如預留 6 個月或 12 個月還款金於現金池）：

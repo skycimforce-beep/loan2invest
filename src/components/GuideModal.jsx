@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { X, Wallet, Sparkles, CheckCircle2, Info } from 'lucide-react';
 import { formatCurrency } from '../utils/finance';
 
@@ -10,6 +10,15 @@ export default function GuideModal({
   cashBufferMonths,
   arbCalc
 }) {
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   return (

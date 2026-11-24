@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   Calculator,
   ArrowRightLeft,
@@ -20,6 +20,7 @@ import {
   Legend
 } from 'recharts';
 import NumberSliderInput from './NumberSliderInput';
+import MobileStickySummary from './MobileStickySummary';
 import {
   formatCurrency,
   formatShortCurrency,
@@ -63,6 +64,7 @@ export default function LoanTab({
   onExportCSV
 }) {
   const [loanChartView, setLoanChartView] = useState('balance'); // 'balance' | 'structure'
+  const heroRef = useRef(null);
 
   const filteredSchedule = loanCalc.schedule.filter(
     (r) => loanTableFilterYear === 'all' || String(r.year) === loanTableFilterYear
@@ -78,8 +80,38 @@ export default function LoanTab({
   const interestShare = totalOutlay > 0 ? (loanCalc.totalInterest / totalOutlay) * 100 : 0;
   const feeShare = Math.max(0, 100 - principalShare - interestShare);
 
+  const stickyPrimary =
+    loanCalcMode === 'by-rate'
+      ? {
+          label: '逆推年利率',
+          value:
+            reverseRateResult.error === 'insufficient'
+              ? '無解'
+              : `${reverseRateResult.error === 'too-high' ? '>' : ''}${reverseRateResult.rate.toFixed(2)}%`,
+          tone: 'accent'
+        }
+      : loanCalcMode === 'by-payment'
+      ? {
+          label: '可貸總額',
+          value: formatCurrency(effectiveLoanAmount),
+          tone: 'accent'
+        }
+      : {
+          label: '應繳月付',
+          value: formatCurrency(loanCalc.postGracePayment),
+          tone: 'accent'
+        };
+
   return (
     <div className="space-y-5">
+      <MobileStickySummary
+        targetRef={heroRef}
+        items={[
+          stickyPrimary,
+          { label: 'APR', value: `${loanCalc.apr.toFixed(2)}%` },
+          { label: '總利息', value: formatShortCurrency(loanCalc.totalInterest) }
+        ]}
+      />
       {/* 2-Col Workspace */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
         {/* Left Control Rail */}
@@ -353,6 +385,7 @@ export default function LoanTab({
               max={Math.min(36, Math.max(0, loanMonths - 1))}
               step={1}
               unit="個月"
+              strictMax
               quickPresets={[
                 { label: '無寬限', value: 0 },
                 { label: '6個月', value: 6 },
@@ -428,6 +461,7 @@ export default function LoanTab({
                     max={Math.max(1, loanMonths - 1)}
                     step={1}
                     unit="個月"
+                    strictMax
                     quickPresets={[
                       { label: '前3期', value: 3 },
                       { label: '前6期', value: 6 },
@@ -490,7 +524,10 @@ export default function LoanTab({
         {/* Right Canvas: Hero + Visual Cost Breakdown + Interactive Chart */}
         <div className="lg:col-span-7 order-1 lg:order-2 space-y-5 min-w-0">
           {/* Hero KPI Card */}
-          <div className="bg-gradient-to-br from-[#D95D39] via-[#CB502D] to-[#A63D1F] rounded-2xl p-5 sm:p-6 text-white shadow-elevated">
+          <div
+            ref={heroRef}
+            className="bg-gradient-to-br from-[#D95D39] via-[#CB502D] to-[#A63D1F] rounded-2xl p-5 sm:p-6 text-white shadow-elevated"
+          >
             <div className="flex flex-wrap items-center justify-between gap-2 mb-5">
               <span className="text-xs font-bold px-3 py-1 rounded-full bg-white/15 backdrop-blur-xs">
                 {loanCalcMode === 'by-payment'

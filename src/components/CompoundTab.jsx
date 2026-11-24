@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { TrendingUp, ArrowRightLeft, Download } from 'lucide-react';
 import {
   AreaChart,
@@ -12,6 +12,7 @@ import {
   Line
 } from 'recharts';
 import NumberSliderInput from './NumberSliderInput';
+import MobileStickySummary from './MobileStickySummary';
 import { formatCurrency, formatShortCurrency } from '../utils/finance';
 
 export default function CompoundTab({
@@ -33,6 +34,7 @@ export default function CompoundTab({
   onSyncToArbitrage,
   onExportCSV
 }) {
+  const heroRef = useRef(null);
   const principalShare =
     compCalc.finalValue > 0
       ? Math.min(100, Math.max(0, (compCalc.totalPrincipal / compCalc.finalValue) * 100))
@@ -41,6 +43,25 @@ export default function CompoundTab({
 
   return (
     <div className="space-y-5">
+      <MobileStickySummary
+        targetRef={heroRef}
+        items={[
+          {
+            label: `期滿總資產(${compYears}年)`,
+            value: formatCurrency(compCalc.finalValue),
+            tone: 'accent'
+          },
+          {
+            label: '複利總獲利',
+            value: `+${formatShortCurrency(compCalc.totalProfit)}`,
+            tone: 'positive'
+          },
+          {
+            label: '總報酬',
+            value: `+${compCalc.roiPercent.toFixed(1)}%`
+          }
+        ]}
+      />
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
         {/* Left Controls */}
         <div className="lg:col-span-5 order-2 lg:order-1 bg-[#FFFDFB] border border-[#EADCD3] rounded-2xl p-4 sm:p-5 shadow-card space-y-4">
@@ -174,7 +195,10 @@ export default function CompoundTab({
         {/* Right Canvas */}
         <div className="lg:col-span-7 order-1 lg:order-2 space-y-5 min-w-0">
           {/* Hero KPI Card */}
-          <div className="bg-gradient-to-br from-[#2C1A12] via-[#3A2319] to-[#4F3124] rounded-2xl p-5 sm:p-6 text-[#FFFDFB] shadow-elevated">
+          <div
+            ref={heroRef}
+            className="bg-gradient-to-br from-[#2C1A12] via-[#3A2319] to-[#4F3124] rounded-2xl p-5 sm:p-6 text-[#FFFDFB] shadow-elevated"
+          >
             <div className="flex flex-wrap items-center justify-between gap-2 mb-5">
               <span className="text-xs font-bold px-3 py-1 rounded-full bg-[#D95D39] text-white">
                 單筆＋定期定額複利成長預測

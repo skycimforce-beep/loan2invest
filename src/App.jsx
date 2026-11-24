@@ -75,7 +75,9 @@ export default function App() {
         graceMonths,
         rateMode,
         singleRate,
-        stage1Rate
+        stage1Months,
+        stage1Rate,
+        stage2Rate
       }),
     [
       targetMonthlyPayment,
@@ -84,7 +86,9 @@ export default function App() {
       graceMonths,
       rateMode,
       singleRate,
-      stage1Rate
+      stage1Months,
+      stage1Rate,
+      stage2Rate
     ]
   );
 
@@ -285,12 +289,50 @@ export default function App() {
     URL.revokeObjectURL(url);
   };
 
+  const handleLoanMonthsChange = (val) => {
+    const safeMonths = Math.max(12, Math.round(Number(val) || 84));
+    setLoanMonths(safeMonths);
+    if (graceMonths >= safeMonths) {
+      setGraceMonths(Math.max(0, safeMonths - 1));
+    }
+    if (stage1Months >= safeMonths) {
+      setStage1Months(Math.max(1, safeMonths - 1));
+    }
+    const maxYears = Math.ceil(safeMonths / 12);
+    if (loanTableFilterYear !== 'all' && Number(loanTableFilterYear) > maxYears) {
+      setLoanTableFilterYear('all');
+    }
+    if (arbTableFilterYear !== 'all' && Number(arbTableFilterYear) > maxYears) {
+      setArbTableFilterYear('all');
+    }
+  };
+
   const handleCopySummary = () => {
-    const modeName =
-      repaymentSource === 'portfolio'
-        ? '模式A：由投資部位提領還款（零額外月付負擔）'
-        : '模式B：由薪資現金流還款（本金完整留存市場複利）';
-    const summaryText = `【WarmRoast｜信貸投資試算摘要】
+    let summaryText = '';
+
+    if (activeTab === 'loan') {
+      summaryText = `【WarmRoast｜信貸還款試算摘要】
+・貸款金額：${formatCurrency(effectiveLoanAmount)}（共 ${loanMonths} 期 / 寬限期 ${graceMonths} 個月）
+・攤還方式：${repaymentMethod === 'equal-pi' ? '本息平均攤還' : '本金平均攤還'}
+・首期／寬限後月付：${formatCurrency(loanCalc.postGracePayment)}
+・總費用年百分率 (APR)：${loanCalc.apr.toFixed(2)}%（含開辦費 ${formatCurrency(loanFee)}）
+・總利息支出：${formatCurrency(loanCalc.totalInterest)}
+・本息＋費用總支出：${formatCurrency(loanCalc.totalPayment + loanFee)}`;
+    } else if (activeTab === 'compound') {
+      summaryText = `【WarmRoast｜投資複利試算摘要】
+・投入條件：單筆 ${formatCurrency(compInitial)} ＋ 每月定額 ${formatCurrency(compMonthlyDCA)}
+・投資期間：${compYears} 年（共 ${compYears * 12} 期 / ${compFreq === 'monthly' ? '按月複利' : '按年複利'}）
+・預期年化報酬率：${compReturnRate.toFixed(1)}%（年通膨 ${compInflation.toFixed(1)}% 折現）
+・累積投入總本金：${formatCurrency(compCalc.totalPrincipal)}
+・期滿預期總資產：${formatCurrency(compCalc.finalValue)}
+・複利總獲利：+${formatCurrency(compCalc.totalProfit)}（+${compCalc.roiPercent.toFixed(1)}%）
+・扣通膨實質購買力：${formatCurrency(compCalc.realFinalValue)}`;
+    } else {
+      const modeName =
+        repaymentSource === 'portfolio'
+          ? `模式A：投資部位自給自足（預留 ${cashBufferMonths} 期準備金）`
+          : '模式B：由薪資現金流還款（本金完整留存市場複利）';
+      summaryText = `【WarmRoast｜信貸投資試算摘要】
 ・貸款金額：${formatCurrency(effectiveLoanAmount)}（共 ${loanMonths} 期 / 寬限期 ${graceMonths} 個月）
 ・實質年百分率 (APR)：${arbCalc.apr.toFixed(2)}%
 ・預期年化總報酬率：${arbCalc.totalExpectedAnnualReturn.toFixed(2)}%（成長 ${arbGrowthRate}% + 配息 ${arbDividendRate}%）
@@ -298,6 +340,7 @@ export default function App() {
 ・還款模式：${modeName}
 ・期滿投資總資產：${formatCurrency(arbCalc.activeFinalAsset)}
 ・期滿扣除所有成本後淨賺：${formatCurrency(arbCalc.activeNetProfit)}`;
+    }
 
     try {
       if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -340,7 +383,7 @@ export default function App() {
             setLoanAmount={setLoanAmount}
             effectiveLoanAmount={effectiveLoanAmount}
             loanMonths={loanMonths}
-            setLoanMonths={setLoanMonths}
+            setLoanMonths={handleLoanMonthsChange}
             repaymentMethod={repaymentMethod}
             setRepaymentMethod={setRepaymentMethod}
             graceMonths={graceMonths}
@@ -404,11 +447,17 @@ export default function App() {
           <ArbitrageTab
             loanAmount={effectiveLoanAmount}
             setLoanAmount={(val) => {
-              if (loanCalcMode === 'by-payment') setLoanCalcMode('by-amount');
+              if (loanCalcMode === 'by-rate') {
+                setSingleRate(Number(effectiveSingleRate.toFixed(2)));
+                setRateMode('single');
+                setLoanCalcMode('by-amount');
+              } else if (loanCalcMode === 'by-payment') {
+                setLoanCalcMode('by-amount');
+              }
               setLoanAmount(val);
             }}
             loanMonths={loanMonths}
-            setLoanMonths={setLoanMonths}
+            setLoanMonths={handleLoanMonthsChange}
             graceMonths={graceMonths}
             setGraceMonths={setGraceMonths}
             effectiveRateMode={effectiveRateMode}
