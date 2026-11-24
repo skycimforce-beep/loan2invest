@@ -2,6 +2,71 @@
 @tailwind components;
 @tailwind utilities;
 
-html {
-  scroll-behavior: smooth;
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    background-color: #FAF5F0;
+    color: #2C1A12;
+  }
+}
+
+/* Product-grade range slider */
+input[type="range"].warm-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  border-radius: 9999px;
+  outline: none;
+  cursor: pointer;
+}
+
+input[type="range"].warm-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 9999px;
+  background: #FFFFFF;
+  border: 2.5px solid #D95D39;
+  box-shadow: 0 2px 6px rgba(44, 26, 18, 0.18);
+  transition: transform 150ms ease, box-shadow 150ms ease;
+}
+
+input[type="range"].warm-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.1);
+  box-shadow: 0 3px 10px rgba(217, 93, 57, 0.35);
+}
+
+input[type="range"].warm-slider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 9999px;
+  background: #FFFFFF;
+  border: 2.5px solid #D95D39;
+  box-shadow: 0 2px 6px rgba(44, 26, 18, 0.18);
+  transition: transform 150ms ease, box-shadow 150ms ease;
+}
+
+/* Subtle custom scrollbar for financial tables */
+.warm-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.warm-scroll::-webkit-scrollbar-track {
+  background: #F4EAE3;
+  border-radius: 9999px;
+}
+
+.warm-scroll::-webkit-scrollbar-thumb {
+  background: #D6BBAE;
+  border-radius: 9999px;
+}
+
+.warm-scroll::-webkit-scrollbar-thumb:hover {
+  background: #B89685;
 }
