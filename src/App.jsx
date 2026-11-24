@@ -359,6 +359,13 @@ export default function App() {
     }
   };
 
+  const handleTabChange = (nextTab) => {
+    setActiveTab(nextTab);
+    if (typeof window !== 'undefined') {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
+
   const totalLoanYears = Math.ceil(loanMonths / 12);
   const yearOptions = Array.from({ length: totalLoanYears }, (_, idx) => idx + 1);
 
@@ -366,7 +373,7 @@ export default function App() {
     <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-[#FAF5F0] text-[#2C1A12] font-sans pb-24 md:pb-12 selection:bg-[#D95D39] selection:text-white">
       <HeaderNav
         activeTab={activeTab}
-        onTabChange={setActiveTab}
+        onTabChange={handleTabChange}
         onCopySummary={handleCopySummary}
         copiedToast={copiedToast}
         onOpenGuide={() => setIsGuideOpen(true)}
@@ -411,7 +418,7 @@ export default function App() {
               setLoanAmount(effectiveLoanAmount);
               setCompInitial(effectiveLoanAmount);
               setCompYears(Math.max(1, Math.round(loanMonths / 12)));
-              setActiveTab('arbitrage');
+              handleTabChange('arbitrage');
             }}
             onExportCSV={handleExportCSV}
           />
@@ -437,7 +444,7 @@ export default function App() {
             onSyncToArbitrage={() => {
               setArbGrowthRate(Number((compReturnRate * 0.6).toFixed(1)));
               setArbDividendRate(Number((compReturnRate * 0.4).toFixed(1)));
-              setActiveTab('arbitrage');
+              handleTabChange('arbitrage');
             }}
             onExportCSV={handleExportCSV}
           />
@@ -445,6 +452,7 @@ export default function App() {
 
         {activeTab === 'arbitrage' && (
           <ArbitrageTab
+            loanConfig={loanConfig}
             loanAmount={effectiveLoanAmount}
             setLoanAmount={(val) => {
               if (loanCalcMode === 'by-rate') {
@@ -493,7 +501,7 @@ export default function App() {
             arbTableFilterYear={arbTableFilterYear}
             setArbTableFilterYear={setArbTableFilterYear}
             yearOptions={yearOptions}
-            onGoToLoanTab={() => setActiveTab('loan')}
+            onGoToLoanTab={() => handleTabChange('loan')}
             onExportCSV={handleExportCSV}
             onOpenGuide={() => setIsGuideOpen(true)}
           />

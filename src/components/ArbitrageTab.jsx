@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import {
   Wallet,
   Sparkles,
@@ -28,7 +28,11 @@ import {
 } from 'recharts';
 import NumberSliderInput from './NumberSliderInput';
 import MobileStickySummary from './MobileStickySummary';
-import { formatCurrency, formatShortCurrency } from '../utils/finance';
+import {
+  formatCurrency,
+  formatShortCurrency,
+  generateArbitrageSimulation
+} from '../utils/finance';
 
 const RETURN_SCENARIOS = [
   { label: '市值成長 7+1.5%', growth: 7.0, div: 1.5 },
@@ -38,6 +42,7 @@ const RETURN_SCENARIOS = [
 ];
 
 export default function ArbitrageTab({
+  loanConfig,
   loanAmount,
   setLoanAmount,
   loanMonths,
@@ -83,6 +88,59 @@ export default function ArbitrageTab({
 }) {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const heroRef = useRef(null);
+
+  const sensitivityRows = useMemo(() => {
+    const baseTotal = arbGrowthRate + arbDividendRate;
+    const deltas = [-2, -1, 0, 1, 2];
+    return deltas.map((delta) => {
+      if (delta === 0) {
+        return {
+          delta,
+          totalRate: baseTotal,
+          netA: arbCalc.finalNetProfitA,
+          netB: arbCalc.finalNetProfitB,
+          depletedA: arbCalc.depletedMonthA
+        };
+      }
+      const targetTotal = Math.max(0, baseTotal + delta);
+      const ratio = baseTotal > 0 ? targetTotal / baseTotal : 1;
+      const g = baseTotal > 0 ? arbGrowthRate * ratio : targetTotal;
+      const d = baseTotal > 0 ? arbDividendRate * ratio : 0;
+      const sim = generateArbitrageSimulation({
+        loanConfig,
+        repaymentSource,
+        cashBufferMonths,
+        annualRefillReserve,
+        extraOwnCapital: arbExtraCapital,
+        extraMonthlyDCA: arbMonthlyDCA,
+        annualGrowthRate: g,
+        annualDividendRate: d,
+        reinvestDividends,
+        deductFeeFromLoan
+      });
+      return {
+        delta,
+        totalRate: targetTotal,
+        netA: sim.finalNetProfitA,
+        netB: sim.finalNetProfitB,
+        depletedA: sim.depletedMonthA
+      };
+    });
+  }, [
+    loanConfig,
+    repaymentSource,
+    cashBufferMonths,
+    annualRefillReserve,
+    arbExtraCapital,
+    arbMonthlyDCA,
+    arbGrowthRate,
+    arbDividendRate,
+    reinvestDividends,
+    deductFeeFromLoan,
+    arbCalc.finalNetProfitA,
+    arbCalc.finalNetProfitB,
+    arbCalc.depletedMonthA
+  ]);
 
   const filteredDetails = arbCalc.monthlyDetails.filter(
     (r) => arbTableFilterYear === 'all' || String(r.year) === arbTableFilterYear
@@ -947,6 +1005,88 @@ export default function ArbitrageTab({
               </p>
             </button>
           </div>
+
+          {/* Return Sensitivity Quick Comparison (±2%) */}
+          <div className="bg-[#FFFDFB] border border-[#EADCD3] rounded-2xl p-4 sm:p-5 shadow-card">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+              <div>
+                <h3 className="text-sm font-extrabold text-[#2C1A12]">
+                  報酬率敏感度對照（假設誤差 ±2%）
+                </h3>
+                <p className="text-[11px] text-[#8B6B5C]">
+                  評估實際年化報酬低於或高於預期時，兩種模式的最終淨賺變化
+                </p>
+              </div>
+              <span className="text-[11px] font-bold text-[#6D4E40] bg-[#FAF5F0] px-2.5 py-1 rounded-lg border border-[#EFE3DC]">
+                損益兩平 APR {arbCalc.apr.toFixed(2)}%
+              </span>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs tabular-nums">
+                <thead>
+                  <tr className="border-b border-[#EFE3DC] text-[#8B6B5C]">
+                    <th className="py-2 pr-2 font-bold">情境報酬</th>
+                    <th className="py-2 px-2 font-bold text-right">模式 A 淨賺</th>
+                    <th className="py-2 px-2 font-bold text-right">模式 B 淨賺</th>
+                    <th className="py-2 pl-2 font-bold text-right">狀態評估</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#F4EAE3]">
+                  {sensitivityRows.map((row) => {
+                    const isBase = row.delta === 0;
+                    const spread = row.totalRate - arbCalc.apr;
+                    return (
+                      <tr
+                        key={row.delta}
+                        className={isBase ? 'bg-[#FFF6F2] font-bold' : 'hover:bg-[#FAF5F0]'}
+                      >
+                        <td className="py-2 pr-2 whitespace-nowrap text-[#2C1A12]">
+                          {row.totalRate.toFixed(1)}%
+                          <span className="ml-1.5 text-[10px] font-bold text-[#8B6B5C]">
+                            {isBase
+                              ? '(目前)'
+                              : `(${row.delta > 0 ? '+' : ''}${row.delta}%)`}
+                          </span>
+                        </td>
+                        <td
+                          className={`py-2 px-2 text-right whitespace-nowrap ${
+                            row.netA >= 0 ? 'text-[#1F7A5C]' : 'text-[#C04832]'
+                          }`}
+                        >
+                          {row.netA >= 0 ? '+' : ''}
+                          {formatCurrency(row.netA)}
+                        </td>
+                        <td
+                          className={`py-2 px-2 text-right whitespace-nowrap ${
+                            row.netB >= 0 ? 'text-[#1F7A5C]' : 'text-[#C04832]'
+                          }`}
+                        >
+                          {row.netB >= 0 ? '+' : ''}
+                          {formatCurrency(row.netB)}
+                        </td>
+                        <td className="py-2 pl-2 text-right whitespace-nowrap">
+                          {row.depletedA ? (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#FDF0ED] text-[#C04832]">
+                              A 於 M{row.depletedA} 耗盡
+                            </span>
+                          ) : spread > 0 ? (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#EAF6F1] text-[#1F7A5C]">
+                              正利差 +{spread.toFixed(1)}%
+                            </span>
+                          ) : (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#FDF0ED] text-[#C04832]">
+                              負利差 {spread.toFixed(1)}%
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1032,24 +1172,24 @@ export default function ArbitrageTab({
           <table className="w-full text-left border-collapse text-xs whitespace-nowrap">
             <thead className="bg-[#F4EAE3] text-[#4B3227] sticky top-0 z-10">
               <tr>
-                <th className="py-2.5 px-3 font-bold">期數</th>
+                <th className="py-2.5 px-2.5 font-bold">期數</th>
                 {repaymentSource === 'portfolio' ? (
                   <>
-                    <th className="py-2.5 px-3 font-bold text-right">期末股票市值</th>
-                    <th className="py-2.5 px-3 font-bold text-right">現金準備金餘額</th>
+                    <th className="py-2.5 px-2.5 font-bold text-right">股票市值</th>
+                    <th className="py-2.5 px-2.5 font-bold text-right">現金準備金</th>
                   </>
                 ) : (
-                  <th className="py-2.5 px-3 font-bold text-right">期初投資資產</th>
+                  <th className="py-2.5 px-2.5 font-bold text-right">期初投資資產</th>
                 )}
-                <th className="py-2.5 px-3 font-bold text-right">當月總收益</th>
-                <th className="py-2.5 px-3 font-bold text-right">信貸月付 (本/息)</th>
+                <th className="py-2.5 px-2.5 font-bold text-right">當月總收益</th>
+                <th className="py-2.5 px-2.5 font-bold text-right">信貸月付</th>
                 {repaymentSource === 'portfolio' && (
-                  <th className="py-2.5 px-3 font-bold text-right">準備金補水動作</th>
+                  <th className="py-2.5 px-2.5 font-bold text-right">補水動作</th>
                 )}
-                <th className="py-2.5 px-3 font-bold text-right">自掏薪水 / 淨結餘</th>
-                <th className="py-2.5 px-3 font-bold text-right">期末總資產</th>
-                <th className="py-2.5 px-3 font-bold text-right">期末剩餘貸款</th>
-                <th className="py-2.5 px-3 font-bold text-right">期末帳面淨值</th>
+                <th className="py-2.5 px-2.5 font-bold text-right">自掏薪水</th>
+                <th className="py-2.5 px-2.5 font-bold text-right">期末總資產</th>
+                <th className="py-2.5 px-2.5 font-bold text-right">剩餘貸款</th>
+                <th className="py-2.5 px-2.5 font-bold text-right">帳面淨值</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#F4EAE3] tabular-nums">
@@ -1058,7 +1198,7 @@ export default function ArbitrageTab({
                 const isSurplus = row.outOfPocketThisMonth <= -0.5;
                 return (
                   <tr key={row.month} className="hover:bg-[#FAF5F0] transition-colors">
-                    <td className="py-2.5 px-3 font-bold text-[#2C1A12]">
+                    <td className="py-2 px-2.5 font-bold text-[#2C1A12]">
                       M{row.month}
                       <span className="ml-1 text-[10px] font-normal text-[#8B6B5C]">
                         Y{row.year}
@@ -1066,25 +1206,27 @@ export default function ArbitrageTab({
                     </td>
                     {repaymentSource === 'portfolio' ? (
                       <>
-                        <td className="py-2.5 px-3 text-right font-semibold text-[#2C1A12]">
+                        <td className="py-2 px-2.5 text-right font-semibold text-[#2C1A12]">
                           {formatCurrency(row.endStockA)}
                         </td>
-                        <td className="py-2.5 px-3 text-right font-semibold text-[#B54B2E]">
+                        <td className="py-2 px-2.5 text-right font-semibold text-[#B54B2E]">
                           {formatCurrency(row.endCashA)}
                         </td>
                       </>
                     ) : (
-                      <td className="py-2.5 px-3 text-right text-[#6D4E40]">
+                      <td className="py-2 px-2.5 text-right text-[#6D4E40]">
                         {formatCurrency(row.startAsset)}
                       </td>
                     )}
-                    <td className="py-2.5 px-3 text-right text-[#1F7A5C] font-semibold">
-                      +{formatCurrency(row.monthTotalReturn)}
-                      <span className="ml-1 text-[10px] font-normal text-[#8B6B5C]">
-                        (息 {formatShortCurrency(row.monthDividend)})
+                    <td className="py-2 px-2.5 text-right">
+                      <span className="text-[#1F7A5C] font-semibold">
+                        +{formatCurrency(row.monthTotalReturn)}
+                      </span>
+                      <span className="block text-[10px] text-[#8B6B5C]">
+                        含息 {formatShortCurrency(row.monthDividend)}
                       </span>
                     </td>
-                    <td className="py-2.5 px-3 text-right">
+                    <td className="py-2 px-2.5 text-right">
                       <span className="font-bold text-[#C04832]">
                         -{formatCurrency(row.loanPayment)}
                       </span>
@@ -1094,18 +1236,18 @@ export default function ArbitrageTab({
                       </span>
                     </td>
                     {repaymentSource === 'portfolio' && (
-                      <td className="py-2.5 px-3 text-right">
+                      <td className="py-2 px-2.5 text-right">
                         {row.principalSoldFromPortfolioA > 0 ? (
                           <span className="inline-block px-2 py-0.5 rounded-md bg-[#FDF0ED] text-[#C04832] font-bold">
-                            賣股補水 {formatCurrency(row.principalSoldFromPortfolioA)}
+                            賣股 {formatShortCurrency(row.principalSoldFromPortfolioA)}
                           </span>
                         ) : (
-                          <span className="text-[#8B6B5C]">水庫扣款</span>
+                          <span className="text-[#8B6B5C]">水庫扣</span>
                         )}
                       </td>
                     )}
                     <td
-                      className={`py-2.5 px-3 text-right font-bold ${
+                      className={`py-2 px-2.5 text-right font-bold ${
                         isZeroPocket || isSurplus ? 'text-[#1F7A5C]' : 'text-[#C04832]'
                       }`}
                     >
@@ -1115,14 +1257,14 @@ export default function ArbitrageTab({
                         ? `+${formatCurrency(Math.abs(row.outOfPocketThisMonth))}`
                         : `-${formatCurrency(row.outOfPocketThisMonth)}`}
                     </td>
-                    <td className="py-2.5 px-3 text-right font-bold text-[#D95D39]">
+                    <td className="py-2 px-2.5 text-right font-bold text-[#D95D39]">
                       {formatCurrency(row.endAsset)}
                     </td>
-                    <td className="py-2.5 px-3 text-right font-semibold text-[#2C1A12]">
+                    <td className="py-2 px-2.5 text-right font-semibold text-[#2C1A12]">
                       {formatCurrency(row.remainingDebt)}
                     </td>
                     <td
-                      className={`py-2.5 px-3 text-right font-extrabold ${
+                      className={`py-2 px-2.5 text-right font-extrabold ${
                         row.currentNetWorth >= 0 ? 'text-[#1F7A5C]' : 'text-[#C04832]'
                       }`}
                     >
